@@ -1,0 +1,351 @@
+```{r}
+#Load libraries
+library(DESeq2)
+library(pheatmap)
+library(dplyr)
+library(RColorBrewer)
+library(ggplot2)
+library(ggrepel)
+
+#Set working directory
+setwd('/rds/homes/s/sxc1561/Computational_Biology_Module/data_files')
+```
+
+```{r}
+#Load count data
+count_data <- read.csv('rna_raw_counts.csv', header = TRUE, row.names = 1)
+colnames(count_data)
+head(count_data)
+
+#Load sample info
+sample_info <- read.csv('sample_sheet.csv', header = TRUE, row.names = 1)
+colnames(sample_info)
+head(sample_info)
+```
+```{r}
+#Count data preprocessing
+count_data <- as.matrix(count_data)
+count_data <- round(count_data)
+
+#Match order of sample sheet and count data
+match_index <- match(row.names(sample_info), colnames(count_data))
+count_data <- count_data[,match_index]
+
+#Check missing values
+dim(count_data)
+stopifnot(length(match_index) > 0)
+stopifnot(row.names(sample_info) == colnames(count_data))
+stopifnot(!any(is.na(row.names(sample_info))))
+stopifnot(!any(is.na(colnames(count_data))))
+dim(count_data)
+```
+
+```{r}
+#Check data quality
+df <- data.frame(
+  sample = row.names(sample_info),
+  num.counts = colSums(count_data),
+  null.counts = colSums(count_data == 0) / dim(count_data)[1] * 100,
+  Description = sample_info$Description
+)
+
+#Remove samples with high null counts
+rm_samples <- row.names(df[df$null.counts >= 75, ])
+rm_samples
+
+count_data <- count_data[,!(row.names(sample_info) %in% rm_samples)]
+sample_info <- sample_info[!(row.names(sample_info) %in% rm_samples), ]
+stopifnot(row.names(sample_info) == colnames(count_data))
+dim(count_data)
+
+#Remove genes with low variance
+read_vars <- rowVars(count_data)
+count_data <- count_data[which(read_vars > 1e-10),]
+dim(count_data)
+
+#Remove genes with too many null counts
+read_valids <- rowSums(count_data != 0)
+raw_counts <- count_data[which(read_valids > 3),]
+dim(count_data)
+
+#Remove genes with too small total counts
+read_cnts <- rowSums(count_data)
+count_data <- count_data[which(read_cnts > 200),]
+dim(count_data)
+```
+
+
+```{r}
+#Set factor levels
+sample_info$REF <- factor(sample_info$REF)
+sample_info$Site <- factor(sample_info$Site)
+sample_info$Description <- factor(sample_info$Description)
+
+#Combine levels of multiple factors into single factor
+sample_info$REF_Site <- interaction(sample_info$REF, sample_info$Site)
+sample_info$REF_Site <- factor(sample_info$REF_Site)
+levels(sample_info$REF_Site)
+
+```
+
+```{r}
+#Create a deseq object and import the count data and sample info
+dds <- DESeqDataSetFromMatrix(countData = count_data, colData = sample_info, design = ~REF_Site)
+```
+
+```{r}
+#Apply DESeq2 model fitting
+dds <- DESeq(dds)
+plotDispEsts(dds)
+```
+
+```{r}
+#Print available DESeq2 results
+resultsNames(dds)[-1]
+```
+
+
+```{r}
+# Initialize an empty list to store the results
+results_list_1x <- list()
+
+# Loop through each location
+for (i in 1:12) {
+    location <- sprintf("%02d", i)
+    contrast <- c('REF_Site', paste0('1x.D', location), 'Control.Control')
+    results_list_1x[[i]] <- results(dds, contrast = contrast)
+}
+
+# Print or further analyze the results
+# Loop through each location and print results
+for (i in 1:length(results_list_1x)) {
+    location <- sprintf("D%02d", i)  # Format the location name
+    cat("Results for location", location, ":\n")
+    print(results_list_1x[[i]])
+    cat("\n")
+}
+
+```
+
+```{r}
+# Initialize an empty list to store the results
+results_list_1x_filtered <- list()
+
+# Threshold for significance (padj)
+padj_threshold <- 0.05
+
+# Loop through each location
+for (i in 1:12) {
+    location <- sprintf("%02d", i)
+    contrast <- c('REF_Site', paste0('1x.D', location), 'Control.Control')
+    result <- results(dds, contrast = contrast)
+    
+    # Filter out rows with NA padj values and padj values above the threshold
+    result_filtered <- result[!is.na(result$padj) & result$padj < padj_threshold, c("padj", "log2FoldChange", "baseMean")]
+    
+    # Store the filtered results
+    results_list_1x_filtered[[i]] <- result_filtered
+}
+
+# Function to extract top genes
+extract_top_genes <- function(result_filtered, n = 10) {
+    # Separate positive and negative log2foldchange values
+    positive_genes <- result_filtered[result_filtered$log2FoldChange > 0, ]
+    negative_genes <- result_filtered[result_filtered$log2FoldChange < 0, ]
+    
+    # Sort positive log2foldchange values in descending order and select top n
+    top_positive_genes <- head(positive_genes[order(-positive_genes$log2FoldChange), ], n)
+    
+    # Sort negative log2foldchange values in ascending order and select top n
+    top_negative_genes <- head(negative_genes[order(negative_genes$log2FoldChange), ], n)
+    
+    return(list(Upregulated = top_positive_genes, Downregulated = top_negative_genes))
+}
+
+# Initialize a list to store top genes for each location
+top_genes_list <- list()
+
+# Loop through each location and extract top genes
+for (i in 1:length(results_list_1x_filtered)) {
+    top_genes_list[[i]] <- extract_top_genes(results_list_1x_filtered[[i]])
+}
+
+# Print or further analyze the top genes
+# Loop through each location and print top genes
+for (i in 1:length(top_genes_list)) {
+    location <- sprintf("D%02d", i)  # Format the location name
+    cat("Top genes for location", location, ":\n")
+    
+    # Print top upregulated genes
+    cat("Upregulated genes:\n")
+    print(top_genes_list[[i]]$Upregulated)
+    
+    # Print top downregulated genes
+    cat("\nDownregulated genes:\n")
+    print(top_genes_list[[i]]$Downregulated)
+    
+    cat("\n")
+}
+
+```
+
+
+```{r}
+# Initialize an empty list to store the results
+results_list_10x_filtered <- list()
+
+# Threshold for significance (padj)
+padj_threshold <- 0.05
+
+# Loop through each location
+for (i in 1:12) {
+    location <- sprintf("%02d", i)  # Format the location number with leading zeros if necessary
+    contrast <- c('REF_Site', paste0('10x.D', location), 'Control.Control')
+    result <- results(dds, contrast = contrast)
+    
+    # Filter out rows with NA padj values and padj values above the threshold
+    result_filtered <- result[!is.na(result$padj) & result$padj < padj_threshold, c("padj", "log2FoldChange", "baseMean")]
+    
+    # Store the filtered results
+    results_list_10x_filtered[[i]] <- result_filtered
+}
+
+# Function to extract top genes
+extract_top_genes <- function(result_filtered, n = 10) {
+    # Separate positive and negative log2foldchange values
+    positive_genes <- result_filtered[result_filtered$log2FoldChange > 0, ]
+    negative_genes <- result_filtered[result_filtered$log2FoldChange < 0, ]
+    
+    # Sort positive log2foldchange values in descending order and select top n
+    top_positive_genes <- head(positive_genes[order(-positive_genes$log2FoldChange), ], n)
+    
+    # Sort negative log2foldchange values in ascending order and select top n
+    top_negative_genes <- head(negative_genes[order(negative_genes$log2FoldChange), ], n)
+    
+    return(list(Upregulated = top_positive_genes, Downregulated = top_negative_genes))
+}
+
+# Initialize a list to store top genes for each location
+top_genes_list_10x <- list()
+
+# Loop through each location and extract top genes
+for (i in 1:length(results_list_10x_filtered)) {
+    top_genes_list_10x[[i]] <- extract_top_genes(results_list_10x_filtered[[i]])
+}
+
+# Print or further analyze the top genes
+# Loop through each location and print top genes
+for (i in 1:length(top_genes_list_10x)) {
+    location <- sprintf("D%02d", i)  # Format the location name
+    cat("Top genes for location", location, ":\n")
+    
+    # Print top upregulated genes
+    cat("Upregulated genes:\n")
+    print(top_genes_list_10x[[i]]$Upregulated)
+    
+    # Print top downregulated genes
+    cat("\nDownregulated genes:\n")
+    print(top_genes_list_10x[[i]]$Downregulated)
+    
+    cat("\n")
+}
+```
+
+
+```{r}
+# Loop through each location and export top genes as CSV files
+for (i in 1:length(top_genes_list_10x)) {
+    location <- sprintf("D%02d", i)  # Format the location name
+    
+    # Export top upregulated genes as CSV
+    upregulated_file <- paste0("top_upregulated_genes_", location, ".csv")
+    write.csv(top_genes_list_10x[[i]]$Upregulated, file = upregulated_file, row.names = TRUE, col.names = TRUE)
+    
+    # Export top downregulated genes as CSV
+    downregulated_file <- paste0("top_downregulated_genes_", location, ".csv")
+    write.csv(top_genes_list_10x[[i]]$Downregulated, file = downregulated_file, row.names = TRUE, col.names = TRUE)
+}
+```
+
+```{r}
+# Initialize lists to store upregulated and downregulated gene IDs from all locations
+upregulated_gene_ids <- list()
+downregulated_gene_ids <- list()
+
+# Loop through each location
+for (i in 1:length(top_genes_list_10x)) {
+    location <- sprintf("D%02d", i)  # Format the location name
+    # Extract upregulated gene IDs for the location
+    upregulated_genes_location <- top_genes_list_10x[[i]]$Upregulated
+    if (nrow(upregulated_genes_location) > 0) {
+        upregulated_gene_ids_location <- rownames(upregulated_genes_location)
+        upregulated_gene_ids[[location]] <- upregulated_gene_ids_location
+    } else {
+        upregulated_gene_ids[[location]] <- NULL
+    }
+    
+    # Extract downregulated gene IDs for the location
+    downregulated_genes_location <- top_genes_list_10x[[i]]$Downregulated
+    if (nrow(downregulated_genes_location) > 0) {
+        downregulated_gene_ids_location <- rownames(downregulated_genes_location)
+        downregulated_gene_ids[[location]] <- downregulated_gene_ids_location
+    } else {
+        downregulated_gene_ids[[location]] <- NULL
+    }
+}
+
+# Print or further analyze the gene IDs
+cat("10x Upregulated gene IDs from all locations sorted by location:\n")
+for (location in sort(names(upregulated_gene_ids))) {
+    cat(location, ":", "\n")
+    if (!is.null(upregulated_gene_ids[[location]])) {
+        print(upregulated_gene_ids[[location]])
+    } else {
+        cat("No upregulated genes\n")
+    }
+}
+
+cat("\n10x Downregulated gene IDs from all locations sorted by location:\n")
+for (location in sort(names(downregulated_gene_ids))) {
+    cat(location, ":", "\n")
+    if (!is.null(downregulated_gene_ids[[location]])) {
+        print(downregulated_gene_ids[[location]])
+    } else {
+        cat("No downregulated genes\n")
+    }
+}
+
+```
+
+```{r}
+# Initialize an empty Excel workbook
+wb <- createWorkbook()
+
+# Loop through each location and add a new sheet for top genes
+for (i in 1:length(top_genes_list)) {
+    location <- sprintf("D%02d", i)  # Format the location name
+    
+    # Create a new sheet for the location
+    addWorksheet(wb, sheetName = location)
+    
+    # Extract top genes for the current location
+    top_genes <- top_genes_list[[i]]
+    
+    # Create data frames for upregulated and downregulated genes
+    upregulated_df <- data.frame(GeneID = rownames(top_genes$Upregulated), top_genes$Upregulated, row.names = NULL)
+    downregulated_df <- data.frame(GeneID = rownames(top_genes$Downregulated), top_genes$Downregulated, row.names = NULL)
+    
+    # Write top upregulated genes to the sheet
+    writeData(wb, sheet = location, upregulated_df, startCol = 1, startRow = 1, rowNames = FALSE)
+    
+    # Write top downregulated genes to the sheet
+    writeData(wb, sheet = location, downregulated_df, startCol = 1, startRow = nrow(upregulated_df) + 3, rowNames = FALSE)
+}
+
+# Define the path for the Excel file
+excel_file <- "top_genes.xlsx"
+
+# Save the workbook to the Excel file
+saveWorkbook(wb, excel_file)
+```
+
