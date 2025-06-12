@@ -1,5 +1,5 @@
-# DNA Compression using Burrows-Wheeler Transform (BWT)
-This project demonstrates the application of the Burrows-Wheeler Transform (BWT), Run-Length Encoding (RLE), and Move-to-Front (MTF) Encoding on DNA sequences. It was developed as part of coursework for the NGS (Next-Generation Sequencing) module for the MSc Bioinformatics program.
+# 🧬 DNA Compression using Burrows-Wheeler Transform (BWT)
+This project was developed as part of coursework for the NGS (Next-Generation Sequencing) module of the MSc Bioinformatics program. This project demonstrates the application of the Burrows-Wheeler Transform (BWT), Run-Length Encoding (RLE), and Move-to-Front (MTF) Encoding on DNA sequences. 
 
 
 ### The code includes:
