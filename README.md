@@ -3,6 +3,7 @@
 This repository contains code and analysis from various module-based projects completed as part of the MSc Bioinformatics program. Each folder corresponds to a specific module and includes scripts, notebooks, and results related to coursework or research projects.
 
 ## 📁 Modules and Projects Included
+- 🤖 Statistical Machine Learning (neuroblastoma-predictive-modelling)
 - 📐 Mathematics and Statistics
 - 🧬 Next Generation Sequencing (NGS)
 - 🧫 Computational Biology
